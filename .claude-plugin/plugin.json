@@ -1,0 +1,26 @@
+{
+  "name": "session-status",
+  "version": "0.1.0-beta.1",
+  "description": "Files each Code-tab session into a status section (In Progress, Waiting for Feedback, Testing, Code Review, Code Review: waiting for fix, Done) by what the session does, per project folder with an optional prefix. Desktop app only. Beta.",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "userConfig": {
+    "folders": {
+      "type": "string",
+      "title": "Folders",
+      "description": "Comma-separated folders the mod acts in, each `path` or `path=PREFIX` (~ allowed), e.g. `~/src/foo=FOO, ~/src/bar=BAR, ~/src/baz`. A session counts when its working directory is one of them or lies below one, worktrees included; the deepest match wins. A prefix names that folder's sections `PREFIX · <status>`. Empty: the mod acts nowhere.",
+      "default": ""
+    },
+    "done": {
+      "type": "boolean",
+      "title": "Done section",
+      "description": "File a session whose turn ends with no open question, no open PR and no pending fix under Done. Off: it stays under In Progress.",
+      "default": true
+    }
+  },
+  "author": {
+    "name": "bate",
+    "url": "https://github.com/bate"
+  },
+  "homepage": "https://github.com/bate/claude-session-status"
+}

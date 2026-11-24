@@ -1,0 +1,14 @@
+{
+  "name": "session-status",
+  "owner": {
+    "name": "bate"
+  },
+  "plugins": [
+    {
+      "name": "session-status",
+      "source": "./",
+      "description": "Files Claude Code desktop sessions into sidebar status sections (In Progress, Testing, Waiting for Feedback, Code Review, Done) by what they do. Beta."
+    }
+  ],
+  "description": "session-status: files Claude Code desktop sessions into sidebar status sections. Beta."
+}

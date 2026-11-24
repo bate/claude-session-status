@@ -13,6 +13,8 @@
  *     or the answer ends in a question)              -> Waiting for Feedback
  *     review feedback not yet pushed                 -> Code Review: waiting for fix
  *     opened a PR this session                       -> Code Review
+ *     background work still runs (subagent, workflow,
+ *     background shell)                              -> In Progress
  *     otherwise                                      -> Done (In Progress when
  *                                                       the `done` option is off)
  * - `git push` after review feedback clears the pending fix.
@@ -64,6 +66,26 @@ const REVIEW_SKILL = /^(pr:review|code-review|code-review:code-review|diff-revie
 const REVIEW_EVENT = /<ci-monitor-event[\s\S]*(review|comment|changes[_ ]requested)/i
 
 type $ = EngineInterface
+
+/**
+ * Background work (subagents, workflows, shells, monitors) the main loop's
+ * last Stop reported, and when. Stop and turn.complete fire close together in
+ * no promised order, so turn.complete trusts a report only this fresh.
+ */
+let background = { count: 0, at: Number.NEGATIVE_INFINITY }
+const BACKGROUND_FRESH_MS = 5000
+/** Agent states that will still wake the session; `idle` teammates do not. */
+const ACTIVE_AGENT = new Set(['pending', 'running', 'waiting'])
+
+/** Whether work this session started still runs and will report back. */
+const isBackgroundRunning = async ($: $) => {
+  const agents = await $.agent.list().catch(() => [])
+  if (agents.some(agent => agent.parentId === undefined && ACTIVE_AGENT.has(agent.status))) {
+    return true
+  }
+
+  return background.count > 0 && (await $.clock.now()) - background.at < BACKGROUND_FRESH_MS
+}
 
 /** Section ids by name, filled from list_sections on first use. */
 let sectionIds: Map<string, string> | undefined
@@ -143,8 +165,15 @@ const folderHere = async ($: $) => {
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
 
-/** Files the session under `key` unless it is already there or pinned. */
-const setStatus = ($: $, key: StatusKey, { isManual = false } = {}) => {
+/**
+ * Files the session under `key` unless it is already there or pinned; with
+ * `onlyFrom`, only while it is still filed under that status.
+ */
+const setStatus = (
+  $: $,
+  key: StatusKey,
+  { isManual = false, onlyFrom }: { isManual?: boolean; onlyFrom?: StatusKey } = {},
+) => {
   queue = queue.then(async () => {
     const folder = await folderHere($)
     if (folder === undefined) {
@@ -155,17 +184,21 @@ const setStatus = ($: $, key: StatusKey, { isManual = false } = {}) => {
     if (now.isPinned && !isManual) {
       return
     }
+    if (onlyFrom !== undefined && now.current !== onlyFrom) {
+      return
+    }
+    // The app already names the plugin in front of this line.
     if (now.current === key) {
-      $.ui.status(`Status: ${name}${now.isPinned ? ' (pinned)' : ''}`)
+      $.ui.status(`${name}${now.isPinned ? ' (pinned)' : ''}`)
 
       return
     }
     try {
       await fileUnder($, name)
       await update($, status, s => ({ ...s, current: key }))
-      $.ui.status(`Status: ${name}${now.isPinned || isManual ? ' (pinned)' : ''}`)
+      $.ui.status(`${name}${now.isPinned || isManual ? ' (pinned)' : ''}`)
     } catch (error) {
-      $.ui.status(`Status: ${name} (not filed)`)
+      $.ui.status(`${name} (not filed)`)
       if (!hasWarned) {
         hasWarned = true
         $.ui.toast(`session-status: could not file the session: ${String(error).slice(0, 160)}`)
@@ -452,10 +485,24 @@ export const register: Register = (on, options) => {
           ? 'review-fix'
           : now.hasPr
             ? 'review'
-            : isDoneOn
+            : isDoneOn && !(await isBackgroundRunning($))
               ? 'done'
               : 'in-progress'
     await setStatus($, key)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The main loop stops while background work still runs: the session is not
+  // done, the app wakes it again when that work reports back.
+  on('classic.Stop', async ($, e, next) => {
+    if (e.agent_id === undefined) {
+      const count = e.background_tasks?.length ?? 0
+      background = { count, at: await $.clock.now() }
+      if (count > 0) {
+        await setStatus($, 'in-progress', { onlyFrom: 'done' })
+      }
+    }
 
     return next(e)
   }).catch(($, e, next) => next(e))

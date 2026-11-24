@@ -1,6 +1,6 @@
 {
   "name": "session-status",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "description": "Files each Code-tab session into a status section (In Progress, Waiting for Feedback, Testing, Code Review, Code Review: waiting for fix, Done) by what the session does, per project folder with an optional prefix. Desktop app only. Beta.",
   "types": "./types/index.d.ts",
   "license": "MIT",

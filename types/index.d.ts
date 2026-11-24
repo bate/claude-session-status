@@ -7,7 +7,10 @@ export type SessionStatus = {
   isPinned: boolean
   /** A PR was opened in this session (gh pr create succeeded). */
   hasPr: boolean
-  /** Review feedback arrived and no push has followed yet. */
+  /**
+   * Waiting on a fix: review feedback arrived and no push has followed yet, or
+   * this session requested changes and has not reviewed or approved since.
+   */
   isFixPending: boolean
   /** This turn asked the user something (wrap_up ask or AskUserQuestion). */
   hasAsked: boolean

@@ -56,7 +56,7 @@ The pane writes the plugin's options as the config menu would. The same options 
 | Testing | a test command starts (`npm test`, `npm run e2e`, `playwright test`, `jest`, `vitest`); the end of the turn files it again |
 | Waiting for Feedback | `AskUserQuestion` is open, or the turn ends with a question to you: the app's next-step question, or an answer whose last lines end in `?` |
 | Code Review | a review skill starts (`/pr:review`, `/code-review`, `diff-review`), or a turn ends after `gh pr create` succeeded in this session |
-| Code Review: waiting for fix | a PR monitor event about review comments or requested changes arrives; the next successful `git push` clears it |
+| Code Review: waiting for fix | as author: a PR monitor event about review comments or requested changes arrives; the next successful `git push` clears it. As reviewer: the session submits a review requesting changes (`gh pr review --request-changes`/`-r`, or `gh api …/pulls/N/reviews` with `REQUEST_CHANGES`); an approving review or the next review skill run clears it |
 | Done | the turn ends with no question, no open PR, no pending fix and no background work still running (subagents, workflows, background shells), or after a successful `gh pr merge`. Off with the Done option: the session stays in In Progress |
 
 At the end of each turn the mod decides in this order: a question to you wins, then a pending fix, then an open PR, then background work that still runs (In Progress), then Done. When that work reports back, the app wakes the session and the next turn end decides again.
@@ -70,8 +70,8 @@ stateDiagram-v2
     InProgress --> Feedback: turn ends with a question
     Feedback --> InProgress: your answer
     InProgress --> CodeReview: turn ends, PR open
-    CodeReview --> WaitingForFix: review comments
-    WaitingForFix --> CodeReview: git push, turn ends
+    CodeReview --> WaitingForFix: review comments, or you request changes
+    WaitingForFix --> CodeReview: git push, or you review again
     CodeReview --> Done: gh pr merge, turn ends
     InProgress --> Done: turn ends, nothing open
     Done --> InProgress: prompt

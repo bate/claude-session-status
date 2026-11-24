@@ -9,6 +9,7 @@ const engine = (
   on: Parameters<Parameters<typeof test>[1]>[1],
   cwd: string,
   agents: { id: string; status: string; parentId?: string }[] = [],
+  stdouts: Record<string, string> = {},
 ) => {
   const moves: string[] = []
   const sections = new Map<string, string>()
@@ -19,7 +20,9 @@ const engine = (
   on('env.get', () => ({ value: '/Users/me' }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
-  on('tool.call', () => ({ result: {} }))
+  on('tool.call', (_, e) => ({
+    result: { stdout: stdouts[String((e as { command?: unknown }).command)] ?? '' },
+  }))
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('clock.now', () => ({ value: 1000 }))
@@ -216,5 +219,83 @@ test(
     })
 
     expect(moves).toEqual(['In Progress', 'Waiting for Feedback'])
+  },
+)
+
+const API_POST = "gh api repos/o/r/pulls/7/reviews --input /tmp/review.json"
+const API_LIST = "gh api repos/o/r/pulls/7/reviews --jq '.[].state'"
+
+test(
+  'requesting changes as reviewer files the session under waiting for fix, also at the turn end',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo', [], {
+      [API_POST]: '{"id":1,"state":"CHANGES_REQUESTED"}',
+    })
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'review the PR' })
+    await $.tool.call({ tool: 'Skill', skill: 'pr:review' })
+    await $.tool.call({ tool: 'Bash', command: API_POST })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual(['In Progress', 'Code Review', 'Code Review: waiting for fix'])
+  },
+)
+
+test(
+  'gh pr review -r counts as requesting changes, an approval clears it',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo')
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'review it' })
+    await $.tool.call({ tool: 'Bash', command: 'gh pr review 7 -r -b "see inline"' })
+    await $.turn.complete(finished)
+    await $.prompt.submit({ text: 'looks good now, approve' })
+    await $.tool.call({ tool: 'Bash', command: 'gh pr review 7 --approve' })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual(['In Progress', 'Code Review: waiting for fix', 'In Progress', 'Done'])
+  },
+)
+
+test(
+  'a review that starts again clears the pending fix',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo')
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'review it' })
+    await $.tool.call({ tool: 'Bash', command: 'gh api repos/o/r/pulls/7/reviews -f event=REQUEST_CHANGES -f body=x' })
+    await $.turn.complete(finished)
+    await $.prompt.submit({ text: 'the author pushed, review again' })
+    await $.tool.call({ tool: 'Skill', skill: 'pr:review' })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual([
+      'In Progress',
+      'Code Review: waiting for fix',
+      'In Progress',
+      'Code Review',
+      'Done',
+    ])
+  },
+)
+
+test(
+  'listing past reviews that requested changes does not count as requesting them',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo', [], {
+      [API_LIST]: '[{"id":1,"state":"CHANGES_REQUESTED"}]',
+      'gh pr review 7 --repo o/r --comment -b hi': '',
+    })
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'what is the state' })
+    await $.tool.call({ tool: 'Bash', command: API_LIST })
+    await $.tool.call({ tool: 'Bash', command: 'gh pr review 7 --repo o/r --comment -b hi' })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual(['In Progress', 'Done'])
   },
 )

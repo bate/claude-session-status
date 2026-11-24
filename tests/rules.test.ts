@@ -5,7 +5,11 @@ import { expect, test } from 'claude-code/testing'
  * answered here and every move it is asked for is recorded, so each test
  * reads which section the session was filed under.
  */
-const engine = (on: Parameters<Parameters<typeof test>[1]>[1], cwd: string) => {
+const engine = (
+  on: Parameters<Parameters<typeof test>[1]>[1],
+  cwd: string,
+  agents: { id: string; status: string; parentId?: string }[] = [],
+) => {
   const moves: string[] = []
   const sections = new Map<string, string>()
   on('command.register', () => ({ value: { command: 'session-status' } }))
@@ -18,6 +22,11 @@ const engine = (on: Parameters<Parameters<typeof test>[1]>[1], cwd: string) => {
   on('tool.call', () => ({ result: {} }))
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('clock.now', () => ({ value: 1000 }))
+  on('agent.list', () => ({
+    value: agents.map(agent => ({ description: 'x', type: 'general-purpose', kind: 'local_agent', ...agent })),
+  }))
+  on('classic.Stop', () => ({}))
   on('mcp.call', (_, e) => {
     const text = (value: unknown) => ({
       value: { content: [{ type: 'text', text: JSON.stringify(value) }], isError: false },
@@ -132,3 +141,80 @@ test('with no folders configured the mod does nothing', async ($, on) => {
 
   expect(moves).toEqual([])
 })
+
+test(
+  'a turn ending while a subagent still runs keeps the session In Progress',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo', [{ id: 'a1', status: 'running' }])
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'analyse it' })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual(['In Progress'])
+  },
+)
+
+test(
+  'a finished subagent no longer holds the session back from Done',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo', [{ id: 'a1', status: 'completed' }])
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'analyse it' })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual(['In Progress', 'Done'])
+  },
+)
+
+test(
+  'background work reported by Stop before the turn end keeps the session In Progress',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo')
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'run the workflow' })
+    await $.classic.Stop({
+      stop_hook_active: false,
+      background_tasks: [{ id: 'w1', type: 'workflow', status: 'running', description: 'review' }],
+    })
+    await $.turn.complete(finished)
+
+    expect(moves).toEqual(['In Progress'])
+  },
+)
+
+test(
+  'background work reported by Stop after the turn end moves the session back from Done',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo')
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'run the workflow' })
+    await $.turn.complete(finished)
+    await $.classic.Stop({
+      stop_hook_active: false,
+      background_tasks: [{ id: 'w1', type: 'workflow', status: 'running', description: 'review' }],
+    })
+
+    expect(moves).toEqual(['In Progress', 'Done', 'In Progress'])
+  },
+)
+
+test(
+  'background work does not pull a waiting question back to In Progress',
+  { options: { folders: '~/src/foo' } },
+  async ($, on) => {
+    const moves = engine(on, '/Users/me/src/foo')
+    await $.session.start(start)
+    await $.prompt.submit({ text: 'analyse it' })
+    await $.turn.complete({ ...finished, answer: 'Which one first?' })
+    await $.classic.Stop({
+      stop_hook_active: false,
+      background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'build' }],
+    })
+
+    expect(moves).toEqual(['In Progress', 'Waiting for Feedback'])
+  },
+)

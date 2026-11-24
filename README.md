@@ -57,9 +57,9 @@ The pane writes the plugin's options as the config menu would. The same options 
 | Waiting for Feedback | `AskUserQuestion` is open, or the turn ends with a question to you: the app's next-step question, or an answer whose last lines end in `?` |
 | Code Review | a review skill starts (`/pr:review`, `/code-review`, `diff-review`), or a turn ends after `gh pr create` succeeded in this session |
 | Code Review: waiting for fix | a PR monitor event about review comments or requested changes arrives; the next successful `git push` clears it |
-| Done | the turn ends with no question, no open PR and no pending fix, or after a successful `gh pr merge`. Off with the Done option: the session stays in In Progress |
+| Done | the turn ends with no question, no open PR, no pending fix and no background work still running (subagents, workflows, background shells), or after a successful `gh pr merge`. Off with the Done option: the session stays in In Progress |
 
-At the end of each turn the mod decides in this order: a question to you wins, then a pending fix, then an open PR, then Done.
+At the end of each turn the mod decides in this order: a question to you wins, then a pending fix, then an open PR, then background work that still runs (In Progress), then Done. When that work reports back, the app wakes the session and the next turn end decides again.
 
 ```mermaid
 stateDiagram-v2
@@ -81,7 +81,7 @@ stateDiagram-v2
     WaitingForFix: Code Review - waiting for fix
 ```
 
-Sections are created the first time they are needed, through the desktop app's own sidebar tools. Rename or reorder them as you like; a section whose name no longer matches is created again the next time the mod needs it. The current status also shows in the status line.
+Sections are created the first time they are needed, through the desktop app's own sidebar tools. Rename or reorder them as you like; a section whose name no longer matches is created again the next time the mod needs it. The current status also shows in the status line, after the plugin name the app puts in front.
 
 ## Pinning by hand
 

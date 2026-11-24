@@ -5,8 +5,11 @@
  * Rules (main loop unless noted):
  * - the user sends a prompt                          -> In Progress
  * - a PR monitor event about review comments arrives -> Code Review: waiting for fix
+ * - this session submits a review requesting changes
+ *   (gh pr review -r, or gh api …/pulls/N/reviews)   -> Code Review: waiting for fix
  * - a test command runs (any loop)                   -> Testing, while it runs
- * - a review skill starts (pr:review, code-review)   -> Code Review
+ * - a review skill starts (pr:review, code-review)   -> Code Review, clearing a
+ *                                                       pending fix
  * - AskUserQuestion is open                          -> Waiting for Feedback
  * - the turn ends:
  *     asked something (wrap_up ask, AskUserQuestion,
@@ -17,7 +20,8 @@
  *     background shell)                              -> In Progress
  *     otherwise                                      -> Done (In Progress when
  *                                                       the `done` option is off)
- * - `git push` after review feedback clears the pending fix.
+ * - `git push` after review feedback clears the pending fix, as does an
+ *   approving review submitted from this session.
  * - `gh pr merge` that succeeds closes the PR: the session counts as done.
  *
  * Option `folders`: `path` or `path=PREFIX`, comma-separated. Sections of a
@@ -64,6 +68,49 @@ const GIT_PUSH = /\bgit\s+push\b/
 const PR_MERGE = /\bgh\s+pr\s+merge\b/
 const REVIEW_SKILL = /^(pr:review|code-review|code-review:code-review|diff-review)$/
 const REVIEW_EVENT = /<ci-monitor-event[\s\S]*(review|comment|changes[_ ]requested)/i
+/** `gh pr review` with its verdict flag, long or short. */
+const CLI_CHANGES = /\bgh\s+pr\s+review\b.*\s(--request-changes|-r)\b/
+const CLI_APPROVE = /\bgh\s+pr\s+review\b.*\s(--approve|-a)\b/
+/** A review submitted through the REST API, directly or as a pending review's event. */
+const API_REVIEW = /\bgh\s+api\b.*\/pulls\/\d+\/reviews(\/\d+(\/events)?)?\b/
+
+/**
+ * The verdict a successful command submitted as a reviewer, if any.
+ *
+ * The API route counts only when the command names the event itself or the
+ * response is one review object: a GET on the same route lists every past
+ * review as an array, and those states say nothing about this call.
+ */
+const reviewVerdict = (command: string, output: string): 'changes' | 'approved' | undefined => {
+  if (CLI_CHANGES.test(command)) {
+    return 'changes'
+  }
+  if (CLI_APPROVE.test(command)) {
+    return 'approved'
+  }
+  if (!API_REVIEW.test(command)) {
+    return undefined
+  }
+  const isOneReview = output.trim().startsWith('{')
+  const said = (event: string, state: string) =>
+    command.includes(event) ||
+    (isOneReview && new RegExp(`"state"\\s*:\\s*"${state}"`).test(output))
+  if (said('REQUEST_CHANGES', 'CHANGES_REQUESTED')) {
+    return 'changes'
+  }
+  if (said('APPROVE', 'APPROVED')) {
+    return 'approved'
+  }
+
+  return undefined
+}
+
+/** What a Bash call printed: stdout from core's record, else the model's text. */
+const outputOf = (ran: { result?: unknown; text?: unknown }) => {
+  const stdout = (ran.result as { stdout?: unknown } | undefined)?.stdout
+
+  return typeof stdout === 'string' ? stdout : typeof ran.text === 'string' ? ran.text : ''
+}
 
 type $ = EngineInterface
 
@@ -253,7 +300,10 @@ const HELP: readonly (readonly [string, string])[] = [
   ['Testing', 'a test command runs (npm test, playwright, jest, vitest)'],
   ['Waiting for Feedback', 'the turn ends with a question to you'],
   ['Code Review', 'a PR was opened in the session, or a review skill runs'],
-  ['Code Review: waiting for fix', 'review comments arrived; the next git push clears it'],
+  [
+    'Code Review: waiting for fix',
+    'review comments arrived, or you requested changes as reviewer; a git push, an approval or the next review clears it',
+  ],
   ['Done', 'the turn ends with nothing open, or the PR was merged (optional)'],
 ]
 
@@ -442,11 +492,21 @@ export const register: Register = (on, options) => {
       if (isOk && GIT_PUSH.test(command)) {
         await update($, status, s => ({ ...s, isFixPending: false }))
       }
+      const verdict = isOk ? reviewVerdict(command, outputOf(ran)) : undefined
+      if (verdict === 'changes') {
+        await update($, status, s => ({ ...s, isFixPending: true }))
+        await setStatus($, 'review-fix')
+      }
+      if (verdict === 'approved') {
+        await update($, status, s => ({ ...s, isFixPending: false }))
+      }
 
       return ran
     }
 
     if (e.tool === 'Skill' && typeof e.skill === 'string' && REVIEW_SKILL.test(e.skill)) {
+      // A review starting again means the fix it waited for has arrived.
+      await update($, status, s => ({ ...s, isFixPending: false }))
       await setStatus($, 'review')
 
       return next(e)

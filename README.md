@@ -38,11 +38,11 @@ Run `/session-status config` in any session. A pane opens beside the chat:
 - **Add this folder**: shown in a session the mod is not active in yet, adds the folder the session runs in.
 - **Finished sessions**: `Go to Done` (default) or `Stay in In Progress`.
 
-The pane writes the plugin's options as the config menu would. The same options can be set in the terminal's `/config` menu, or in `~/.claude/settings.json`:
+The pane writes the plugin's options as the config menu would. The same options can be set with `/plugin configure session-status@session-status`, in the terminal's `/config` menu, or in `~/.claude/settings.json` under the installed plugin's key:
 
 ```json
 "pluginConfigs": {
-  "session-status": {
+  "session-status@session-status": {
     "options": { "folders": "~/src/foo=FOO, ~/src/bar=BAR, ~/src/baz", "done": true }
   }
 }
